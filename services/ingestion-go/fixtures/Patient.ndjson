@@ -1,0 +1,3 @@
+{"resourceType":"Patient","id":"p1","gender":"female","birthDate":"1975-05-15","name":[{"family":"Carter","given":["Anita"]}]}
+{"resourceType":"Patient","id":"p2","gender":"male","birthDate":"1960-03-20","name":[{"family":"Singh","given":["Ravi"]}]}
+{"resourceType":"Patient","id":"p3","gender":"female","birthDate":"1980-08-10","name":[{"family":"Nguyen","given":["Mei"]}]}

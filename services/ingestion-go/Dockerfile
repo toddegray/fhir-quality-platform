@@ -4,11 +4,12 @@
 FROM golang:1.22-alpine AS build
 WORKDIR /src
 
-COPY go.mod ./
-RUN go mod download
-
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/ingestion-go .
+# Tidy + build in one step so `go mod tidy` sees both go.mod and the
+# import statements in the source. We deliberately don't vendor go.sum
+# into the repo — go.mod is the single source of truth for deps.
+RUN go mod tidy && \
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/ingestion-go .
 
 # --- runtime stage --------------------------------------------------------
 FROM alpine:3.20

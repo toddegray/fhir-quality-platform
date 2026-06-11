@@ -83,11 +83,14 @@ services:
     environment:
       LISTEN_ADDR: ":8080"
       NATS_URL: nats://nats:4222
+      FIXTURES_DIR: /data/fixtures
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: fqp
       MINIO_SECRET_KEY: fqp-local-dev
     ports:
       - "8081:8080"
+    volumes:
+      - ./services/ingestion-go/fixtures:/data/fixtures:ro
     healthcheck:
       test: ["CMD", "wget", "-q", "-O-", "http://localhost:8080/healthz"]
       interval: 5s
