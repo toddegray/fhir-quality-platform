@@ -114,11 +114,11 @@ func main() {
 	log.Info("ingestion-go stopped")
 }
 
-// runIngestion picks a Source, runs the pipeline, and records the result
-// in the atomics so /healthz can report it. It deliberately catches and
-// records every failure rather than panicking — the HTTP server should
-// keep serving so docker-compose, the BFF, and the dashboard can all
-// observe the failure mode.
+// runIngestion runs one ingestion pass per configured source. SOURCE_MODE
+// is comma-separated — e.g. "FIXTURES,EPIC_REST" loads the synthetic
+// chart and pulls real Epic patient data side-by-side, archiving both
+// under separate prefixes in MinIO. A failure in one source is logged
+// and reported via /healthz but doesn't abort the others.
 func runIngestion(log *slog.Logger, archive *MinIOArchive, pub *Publisher) {
 	// Vanilla NATS does not persist — wait long enough for the analytics
 	// subscriber to register before publishing.
@@ -127,52 +127,57 @@ func runIngestion(log *slog.Logger, archive *MinIOArchive, pub *Publisher) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	source, err := buildSource(ctx, log)
-	if err != nil {
-		log.Error("source init failed", "err", err)
-		lastError.Store(err.Error())
-		return
+	modes := splitCSV(envOr("SOURCE_MODE", "FIXTURES"))
+	var sourceNames []string
+	var anySuccess bool
+	for _, mode := range modes {
+		jobID := time.Now().UTC().Format("20060102T150405Z") + "-" + strings.ToLower(mode)
+		if err := runOneSource(ctx, mode, jobID, archive, pub, log); err != nil {
+			log.Error("source pipeline failed", "mode", mode, "err", err)
+			lastError.Store(mode + ": " + err.Error())
+			continue
+		}
+		sourceNames = append(sourceNames, mode)
+		anySuccess = true
+		lastJobID.Store(jobID)
 	}
-	lastMode.Store(source.Name())
-	jobID := time.Now().UTC().Format("20060102T150405Z")
-	lastJobID.Store(jobID)
+	if anySuccess {
+		lastMode.Store(strings.Join(sourceNames, ","))
+	}
+	if err := pub.conn.Flush(); err != nil {
+		log.Error("nats flush failed", "err", err)
+		lastError.Store(err.Error())
+	}
+	log.Info("ingestion complete", "sources", sourceNames, "lines", published.Load(), "files", archived.Load())
+}
 
+func runOneSource(ctx context.Context, mode, jobID string, archive *MinIOArchive, pub *Publisher, log *slog.Logger) error {
+	source, err := buildSourceForMode(ctx, mode, log)
+	if err != nil {
+		return fmt.Errorf("init: %w", err)
+	}
 	log.Info("ingestion run starting", "source", source.Name(), "job_id", jobID)
 	files, err := source.Files(ctx)
 	if err != nil {
-		log.Error("source fetch failed", "err", err)
-		lastError.Store(err.Error())
-		return
+		return fmt.Errorf("fetch: %w", err)
 	}
-
 	for _, f := range files {
 		if _, err := archive.Put(ctx, jobID, f); err != nil {
-			log.Error("archive put failed", "err", err, "resource", f.ResourceType)
-			lastError.Store(err.Error())
-			return
+			return fmt.Errorf("archive %s: %w", f.ResourceType, err)
 		}
 		archived.Add(1)
 		n, err := pub.Publish(f)
 		if err != nil {
-			log.Error("publish failed", "err", err, "resource", f.ResourceType)
-			lastError.Store(err.Error())
-			return
+			return fmt.Errorf("publish %s: %w", f.ResourceType, err)
 		}
 		published.Add(int64(n))
-		log.Info("ingested file", "resource", f.ResourceType, "lines", n)
+		log.Info("ingested file", "source", source.Name(), "resource", f.ResourceType, "lines", n)
 	}
-
-	if err := pub.conn.Flush(); err != nil {
-		log.Error("nats flush failed", "err", err)
-		lastError.Store(err.Error())
-		return
-	}
-	log.Info("ingestion run complete", "files", len(files), "lines", published.Load())
+	return nil
 }
 
-func buildSource(ctx context.Context, log *slog.Logger) (Source, error) {
-	mode := strings.ToUpper(envOr("SOURCE_MODE", "FIXTURES"))
-	switch mode {
+func buildSourceForMode(ctx context.Context, mode string, log *slog.Logger) (Source, error) {
+	switch strings.ToUpper(mode) {
 	case "FIXTURES":
 		return &FixtureSource{
 			Dir:   envOr("FIXTURES_DIR", defaultFixturesDir),
@@ -180,8 +185,10 @@ func buildSource(ctx context.Context, log *slog.Logger) (Source, error) {
 		}, nil
 	case "BULK_EXPORT":
 		return buildBulkExportSource(ctx, log)
+	case "EPIC_REST":
+		return buildEpicRestSource(ctx, log)
 	default:
-		return nil, fmt.Errorf("unknown SOURCE_MODE %q (want FIXTURES or BULK_EXPORT)", mode)
+		return nil, fmt.Errorf("unknown source mode %q (want FIXTURES, BULK_EXPORT, or EPIC_REST)", mode)
 	}
 }
 
@@ -213,8 +220,39 @@ func buildBulkExportSource(ctx context.Context, log *slog.Logger) (*BulkExportSo
 		KeyID:          keyID,
 		Scopes:         scopes,
 		ResourceTypes:  resourceTypes,
+		ExportScope:    envOr("EPIC_EXPORT_SCOPE", "patient"),
+		GroupID:        os.Getenv("EPIC_GROUP_ID"),
 		PollInterval:   parseDurationOr("EPIC_POLL_INTERVAL", 5*time.Second),
 		PollMaxRetries: parseIntOr("EPIC_POLL_MAX_RETRIES", 60),
+	}, log)
+}
+
+func buildEpicRestSource(ctx context.Context, log *slog.Logger) (*EpicRestSource, error) {
+	fhirBase := os.Getenv("EPIC_FHIR_BASE")
+	clientID := os.Getenv("EPIC_CLIENT_ID")
+	keyID := envOr("EPIC_KEY_ID", "ingestion-go-1")
+	keyPEM := os.Getenv("EPIC_PRIVATE_KEY_PEM")
+	scopes := splitCSV(envOr("EPIC_SCOPES",
+		"system/Patient.read system/Patient.search system/Condition.read"))
+	patientIDs := splitCSV(envOr("EPIC_PATIENT_IDS", "erXuFYUfucBZaryVksYEcMg3"))
+
+	if fhirBase == "" || clientID == "" || keyPEM == "" {
+		return nil, errors.New("EPIC_REST mode requires EPIC_FHIR_BASE, EPIC_CLIENT_ID, EPIC_PRIVATE_KEY_PEM")
+	}
+	tokenEndpoint, err := DiscoverTokenEndpoint(ctx, fhirBase)
+	if err != nil {
+		return nil, fmt.Errorf("smart configuration: %w", err)
+	}
+	log.Info("epic-rest: discovered token endpoint", "endpoint", tokenEndpoint)
+
+	return NewEpicRestSource(EpicRestConfig{
+		FhirBase:      fhirBase,
+		ClientID:      clientID,
+		TokenEndpoint: tokenEndpoint,
+		PrivateKeyPEM: []byte(strings.ReplaceAll(keyPEM, `\n`, "\n")),
+		KeyID:         keyID,
+		Scopes:        scopes,
+		PatientIDs:    patientIDs,
 	}, log)
 }
 

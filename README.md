@@ -107,26 +107,46 @@ URLs once the stack is up:
 | MinIO console | http://localhost:9001 (`fqp` / `fqp-local-dev`) |
 | NATS monitoring | http://localhost:8222 |
 
-### Switching to a real FHIR Bulk Data `$export`
+### Adding a real FHIR source
 
-To replace the bundled fixtures with a live `$export` against an EHR
-(e.g. the Epic R4 sandbox):
+`SOURCE_MODE` is comma-separated, so the fixture-driven demo and a real
+EHR pull can run side-by-side:
 
 ```bash
 cp .env.example .env
-# fill in EPIC_FHIR_BASE, EPIC_CLIENT_ID, EPIC_PRIVATE_KEY_PEM, …
-# then set SOURCE_MODE=BULK_EXPORT
+# Fill in EPIC_FHIR_BASE, EPIC_CLIENT_ID, EPIC_PRIVATE_KEY_PEM, EPIC_KEY_ID
+# Pick mode(s):
+#   SOURCE_MODE=FIXTURES                  demo only (default)
+#   SOURCE_MODE=FIXTURES,EPIC_REST        demo + real patient pulled via FHIR REST
+#   SOURCE_MODE=BULK_EXPORT               full $export against a compliant server
+#   SOURCE_MODE=FIXTURES,BULK_EXPORT      both
 docker compose up -d --force-recreate ingestion-go
 ```
 
-`ingestion-go` will discover the token endpoint via
-`/.well-known/smart-configuration`, sign a `client_assertion` JWT with
-RS384 + the configured `kid`, exchange it for an access token, kick off
-`$export`, poll the status URL, download each NDJSON file from the
-manifest, archive it to MinIO, and publish to NATS. The dashboard's
-CMS122 number recomputes against whatever the EHR returns.
+`ingestion-go` discovers the token endpoint via
+`/.well-known/smart-configuration`, signs a `client_assertion` JWT with
+RS384 + the configured `kid`, exchanges it for an access token, then
+either:
 
-`.env` is gitignored.
+* (`BULK_EXPORT`) kicks off `$export`, polls the status URL, downloads
+  each NDJSON file from the manifest;
+* (`EPIC_REST`) calls `GET /Patient/{id}` for each configured
+  `EPIC_PATIENT_IDS` entry.
+
+Either path archives the resulting NDJSON to MinIO under a per-source
+prefix (`raw/<source>/<jobId>/<ResourceType>.ndjson`) and publishes
+one NATS message per resource.
+
+**Epic R4 sandbox caveat.** The Backend Services client used in
+chiron-cds-spike is registered for `system/Patient.r + .s` plus
+read-by-id on `Condition`, `DiagnosticReport`, `MedicationRequest`
+only — Bulk Data is not enabled and `Observation`/`Encounter` aren't
+granted. So `EPIC_REST` mode pulls real Patient resources (visible in
+MinIO console) but the CMS122 score stays driven by the synthetic
+fixtures, which carry the full Encounter + Observation chart needed
+for the measure.
+
+`.env`, `*.pem`, and `*.key` are all gitignored.
 
 Service-specific build/test commands live in each service's `README.md`.
 

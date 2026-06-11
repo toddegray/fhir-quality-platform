@@ -98,6 +98,9 @@ services:
       EPIC_KEY_ID: ${EPIC_KEY_ID:-ingestion-go-1}
       EPIC_SCOPES: ${EPIC_SCOPES:-system/Patient.read system/Condition.read system/Observation.read system/Encounter.read}
       EPIC_RESOURCE_TYPES: ${EPIC_RESOURCE_TYPES:-Patient,Condition,Observation,Encounter}
+      EPIC_EXPORT_SCOPE: ${EPIC_EXPORT_SCOPE:-patient}
+      EPIC_GROUP_ID: ${EPIC_GROUP_ID:-}
+      EPIC_PATIENT_IDS: ${EPIC_PATIENT_IDS:-erXuFYUfucBZaryVksYEcMg3}
       EPIC_POLL_INTERVAL: ${EPIC_POLL_INTERVAL:-5s}
       EPIC_POLL_MAX_RETRIES: ${EPIC_POLL_MAX_RETRIES:-60}
     ports:

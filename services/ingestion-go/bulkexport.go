@@ -22,6 +22,15 @@ import (
 
 // BulkExportConfig describes one SMART Backend Services + Bulk Data
 // integration. ResourceTypes is the FHIR _type filter sent to $export.
+//
+// ExportScope picks which Bulk Data variant to invoke:
+//
+//	"system"   →  [base]/$export
+//	"patient"  →  [base]/Patient/$export
+//	"group"    →  [base]/Group/<GroupID>/$export
+//
+// Epic's R4 sandbox does not implement system-level export; "patient"
+// or "group" is required. Defaults to "patient" when empty.
 type BulkExportConfig struct {
 	FhirBase       string   // e.g. https://fhir.epic.com/interconnect-fhir-oauth/api/FHIR/R4
 	ClientID       string   // SMART Backend Services client id
@@ -30,6 +39,8 @@ type BulkExportConfig struct {
 	KeyID          string   // kid published in our JWKS
 	Scopes         []string // e.g. ["system/Patient.read", ...]
 	ResourceTypes  []string // _type query param on $export
+	ExportScope    string   // system | patient | group
+	GroupID        string   // required when ExportScope == "group"
 	PollInterval   time.Duration
 	PollMaxRetries int
 }
@@ -142,11 +153,15 @@ func (s *BulkExportSource) requestAccessToken(ctx context.Context) (*tokenRespon
 	return &tok, nil
 }
 
-// initExport POSTs $export against the FHIR base. The response status
-// is 202 Accepted with a Content-Location header pointing at the job
-// status endpoint.
+// initExport invokes the appropriate $export variant per ExportScope.
+// The response is 202 Accepted with a Content-Location header pointing
+// at the job status endpoint.
 func (s *BulkExportSource) initExport(ctx context.Context, accessToken string) (string, error) {
-	u, err := url.Parse(strings.TrimRight(s.cfg.FhirBase, "/") + "/$export")
+	exportURL, err := s.buildExportURL()
+	if err != nil {
+		return "", err
+	}
+	u, err := url.Parse(exportURL)
 	if err != nil {
 		return "", err
 	}
@@ -177,6 +192,28 @@ func (s *BulkExportSource) initExport(ctx context.Context, accessToken string) (
 		return "", errors.New("$export: missing Content-Location header")
 	}
 	return statusURL, nil
+}
+
+// buildExportURL composes the $export URL for the configured scope.
+func (s *BulkExportSource) buildExportURL() (string, error) {
+	base := strings.TrimRight(s.cfg.FhirBase, "/")
+	scope := strings.ToLower(s.cfg.ExportScope)
+	if scope == "" {
+		scope = "patient"
+	}
+	switch scope {
+	case "system":
+		return base + "/$export", nil
+	case "patient":
+		return base + "/Patient/$export", nil
+	case "group":
+		if s.cfg.GroupID == "" {
+			return "", errors.New("group export requires GroupID")
+		}
+		return base + "/Group/" + url.PathEscape(s.cfg.GroupID) + "/$export", nil
+	default:
+		return "", fmt.Errorf("unknown export scope %q", scope)
+	}
 }
 
 // bulkManifest is the JSON body returned when an $export job reaches
