@@ -94,49 +94,72 @@ services:
       timeout: 3s
       retries: 5
 
-  # analytics-py:
-  #   build: ./services/analytics-py
-  #   container_name: fqp-analytics-py
-  #   depends_on:
-  #     nats: { condition: service_started }
-  #     timescale: { condition: service_healthy }
-  #   environment:
-  #     NATS_URL: nats://nats:4222
-  #     TIMESCALE_DSN: postgres://fqp:fqp@timescale:5432/fqp_measures
-  #   ports:
-  #     - "8082:8080"
+  analytics-py:
+    build: ./services/analytics-py
+    container_name: fqp-analytics-py
+    depends_on:
+      nats: { condition: service_started }
+      timescale: { condition: service_healthy }
+    environment:
+      NATS_URL: nats://nats:4222
+      TIMESCALE_DSN: postgres://fqp:fqp@timescale:5432/fqp_measures
+    ports:
+      - "8082:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/healthz').read()"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
-  # core-spring:
-  #   build: ./services/core-spring
-  #   container_name: fqp-core-spring
-  #   depends_on:
-  #     postgres: { condition: service_healthy }
-  #   environment:
-  #     SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/fqp_core
-  #     SPRING_DATASOURCE_USERNAME: fqp
-  #     SPRING_DATASOURCE_PASSWORD: fqp
-  #   ports:
-  #     - "8083:8080"
+  core-spring:
+    build: ./services/core-spring
+    container_name: fqp-core-spring
+    depends_on:
+      postgres: { condition: service_healthy }
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/fqp_core
+      SPRING_DATASOURCE_USERNAME: fqp
+      SPRING_DATASOURCE_PASSWORD: fqp
+    ports:
+      - "8083:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 15
+      start_period: 30s
 
-  # edge-node:
-  #   build: ./services/edge-node
-  #   container_name: fqp-edge-node
-  #   depends_on:
-  #     - core-spring
-  #     - analytics-py
-  #   environment:
-  #     CORE_API_URL: http://core-spring:8080
-  #     ANALYTICS_API_URL: http://analytics-py:8080
-  #   ports:
-  #     - "8084:8080"
+  edge-node:
+    build: ./services/edge-node
+    container_name: fqp-edge-node
+    depends_on:
+      core-spring: { condition: service_started }
+      analytics-py: { condition: service_started }
+    environment:
+      LISTEN_ADDR: "0.0.0.0"
+      PORT: "8080"
+      CORE_API_URL: http://core-spring:8080
+      ANALYTICS_API_URL: http://analytics-py:8080
+    ports:
+      - "8084:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
-  # dashboard-angular:
-  #   build: ./apps/dashboard-angular
-  #   container_name: fqp-dashboard
-  #   depends_on:
-  #     - edge-node
-  #   ports:
-  #     - "4200:80"
+  dashboard-angular:
+    build: ./apps/dashboard-angular
+    container_name: fqp-dashboard
+    depends_on:
+      edge-node: { condition: service_started }
+    ports:
+      - "4200:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
 volumes:
   postgres-data:
