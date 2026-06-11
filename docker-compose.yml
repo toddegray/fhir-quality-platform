@@ -1,0 +1,139 @@
+# Local development stack for fhir-quality-platform.
+#
+# Brings up the infrastructure tier (Postgres, TimescaleDB, NATS JetStream,
+# MinIO) plus a build target per service. Service containers are stubs for
+# now — they build from each service directory's Dockerfile but do not yet
+# run real workloads. Fill in as each service comes online.
+
+services:
+  # ---------- Infrastructure ----------------------------------------------
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: fqp-postgres
+    environment:
+      POSTGRES_USER: fqp
+      POSTGRES_PASSWORD: fqp
+      POSTGRES_DB: fqp_core
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fqp -d fqp_core"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  timescale:
+    image: timescale/timescaledb:latest-pg16
+    container_name: fqp-timescale
+    environment:
+      POSTGRES_USER: fqp
+      POSTGRES_PASSWORD: fqp
+      POSTGRES_DB: fqp_measures
+    ports:
+      - "5433:5432"
+    volumes:
+      - timescale-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fqp -d fqp_measures"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  nats:
+    image: nats:2-alpine
+    container_name: fqp-nats
+    command: ["-js", "-sd", "/data"]
+    ports:
+      - "4222:4222"   # client
+      - "8222:8222"   # monitoring
+    volumes:
+      - nats-data:/data
+
+  minio:
+    image: minio/minio:latest
+    container_name: fqp-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: fqp
+      MINIO_ROOT_PASSWORD: fqp-local-dev
+    ports:
+      - "9000:9000"   # S3 API
+      - "9001:9001"   # console
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ---------- Services ----------------------------------------------------
+  # Each service's Dockerfile lives in its own directory. They are commented
+  # out until each service has a runnable stub; uncomment as they come online.
+
+  # ingestion-go:
+  #   build: ./services/ingestion-go
+  #   container_name: fqp-ingestion-go
+  #   depends_on:
+  #     nats: { condition: service_started }
+  #     minio: { condition: service_healthy }
+  #   environment:
+  #     NATS_URL: nats://nats:4222
+  #     MINIO_ENDPOINT: minio:9000
+  #     MINIO_ACCESS_KEY: fqp
+  #     MINIO_SECRET_KEY: fqp-local-dev
+  #   ports:
+  #     - "8081:8080"
+
+  # analytics-py:
+  #   build: ./services/analytics-py
+  #   container_name: fqp-analytics-py
+  #   depends_on:
+  #     nats: { condition: service_started }
+  #     timescale: { condition: service_healthy }
+  #   environment:
+  #     NATS_URL: nats://nats:4222
+  #     TIMESCALE_DSN: postgres://fqp:fqp@timescale:5432/fqp_measures
+  #   ports:
+  #     - "8082:8080"
+
+  # core-spring:
+  #   build: ./services/core-spring
+  #   container_name: fqp-core-spring
+  #   depends_on:
+  #     postgres: { condition: service_healthy }
+  #   environment:
+  #     SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/fqp_core
+  #     SPRING_DATASOURCE_USERNAME: fqp
+  #     SPRING_DATASOURCE_PASSWORD: fqp
+  #   ports:
+  #     - "8083:8080"
+
+  # edge-node:
+  #   build: ./services/edge-node
+  #   container_name: fqp-edge-node
+  #   depends_on:
+  #     - core-spring
+  #     - analytics-py
+  #   environment:
+  #     CORE_API_URL: http://core-spring:8080
+  #     ANALYTICS_API_URL: http://analytics-py:8080
+  #   ports:
+  #     - "8084:8080"
+
+  # dashboard-angular:
+  #   build: ./apps/dashboard-angular
+  #   container_name: fqp-dashboard
+  #   depends_on:
+  #     - edge-node
+  #   ports:
+  #     - "4200:80"
+
+volumes:
+  postgres-data:
+  timescale-data:
+  nats-data:
+  minio-data:
