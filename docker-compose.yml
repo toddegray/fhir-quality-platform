@@ -74,19 +74,25 @@ services:
   # Each service's Dockerfile lives in its own directory. They are commented
   # out until each service has a runnable stub; uncomment as they come online.
 
-  # ingestion-go:
-  #   build: ./services/ingestion-go
-  #   container_name: fqp-ingestion-go
-  #   depends_on:
-  #     nats: { condition: service_started }
-  #     minio: { condition: service_healthy }
-  #   environment:
-  #     NATS_URL: nats://nats:4222
-  #     MINIO_ENDPOINT: minio:9000
-  #     MINIO_ACCESS_KEY: fqp
-  #     MINIO_SECRET_KEY: fqp-local-dev
-  #   ports:
-  #     - "8081:8080"
+  ingestion-go:
+    build: ./services/ingestion-go
+    container_name: fqp-ingestion-go
+    depends_on:
+      nats: { condition: service_started }
+      minio: { condition: service_healthy }
+    environment:
+      LISTEN_ADDR: ":8080"
+      NATS_URL: nats://nats:4222
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: fqp
+      MINIO_SECRET_KEY: fqp-local-dev
+    ports:
+      - "8081:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:8080/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   # analytics-py:
   #   build: ./services/analytics-py
