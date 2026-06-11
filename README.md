@@ -88,9 +88,47 @@ Prerequisites: Docker Desktop (or equivalent), then:
 docker compose up -d
 ```
 
-This boots Postgres, TimescaleDB, NATS JetStream, MinIO, and each service
-container. Service-specific build/test commands live in each service's
-`README.md`.
+This boots Postgres, TimescaleDB, NATS, MinIO, and each service container.
+Out of the box `ingestion-go` runs in **`FIXTURES` mode**, reading three
+synthetic patients from `services/ingestion-go/fixtures/*.ndjson`,
+archiving each file to `s3://fqp-raw/raw/fixtures/<jobId>/` in MinIO,
+and publishing one NATS message per resource on `fhir.resource.<Type>`.
+CMS122 ends up at **50 % poor control** (1 of 2 diabetics > 9 % HbA1c).
+
+URLs once the stack is up:
+
+| What | URL |
+| --- | --- |
+| Dashboard | http://localhost:4200 |
+| Edge BFF | http://localhost:8084/api/measures/cms122 |
+| Spring core | http://localhost:8083/measures/CMS122 |
+| Python analytics | http://localhost:8082/measures/cms122/results |
+| Go ingestion | http://localhost:8081/healthz |
+| MinIO console | http://localhost:9001 (`fqp` / `fqp-local-dev`) |
+| NATS monitoring | http://localhost:8222 |
+
+### Switching to a real FHIR Bulk Data `$export`
+
+To replace the bundled fixtures with a live `$export` against an EHR
+(e.g. the Epic R4 sandbox):
+
+```bash
+cp .env.example .env
+# fill in EPIC_FHIR_BASE, EPIC_CLIENT_ID, EPIC_PRIVATE_KEY_PEM, …
+# then set SOURCE_MODE=BULK_EXPORT
+docker compose up -d --force-recreate ingestion-go
+```
+
+`ingestion-go` will discover the token endpoint via
+`/.well-known/smart-configuration`, sign a `client_assertion` JWT with
+RS384 + the configured `kid`, exchange it for an access token, kick off
+`$export`, poll the status URL, download each NDJSON file from the
+manifest, archive it to MinIO, and publish to NATS. The dashboard's
+CMS122 number recomputes against whatever the EHR returns.
+
+`.env` is gitignored.
+
+Service-specific build/test commands live in each service's `README.md`.
 
 ## Status
 

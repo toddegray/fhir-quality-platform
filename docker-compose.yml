@@ -87,6 +87,19 @@ services:
       MINIO_ENDPOINT: minio:9000
       MINIO_ACCESS_KEY: fqp
       MINIO_SECRET_KEY: fqp-local-dev
+      MINIO_BUCKET: fqp-raw
+      # Source-mode + optional Epic Bulk Data $export settings. Empty by
+      # default; populate via .env (see .env.example) to switch from the
+      # bundled fixtures to a live $export against the EHR.
+      SOURCE_MODE: ${SOURCE_MODE:-FIXTURES}
+      EPIC_FHIR_BASE: ${EPIC_FHIR_BASE:-}
+      EPIC_CLIENT_ID: ${EPIC_CLIENT_ID:-}
+      EPIC_PRIVATE_KEY_PEM: ${EPIC_PRIVATE_KEY_PEM:-}
+      EPIC_KEY_ID: ${EPIC_KEY_ID:-ingestion-go-1}
+      EPIC_SCOPES: ${EPIC_SCOPES:-system/Patient.read system/Condition.read system/Observation.read system/Encounter.read}
+      EPIC_RESOURCE_TYPES: ${EPIC_RESOURCE_TYPES:-Patient,Condition,Observation,Encounter}
+      EPIC_POLL_INTERVAL: ${EPIC_POLL_INTERVAL:-5s}
+      EPIC_POLL_MAX_RETRIES: ${EPIC_POLL_MAX_RETRIES:-60}
     ports:
       - "8081:8080"
     volumes:

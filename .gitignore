@@ -11,6 +11,8 @@ Thumbs.db
 .env.local
 *.local
 **/secrets/
+**/*.pem
+**/*.key
 
 # --- Go (services/ingestion-go) -------------------------------------------
 *.exe
