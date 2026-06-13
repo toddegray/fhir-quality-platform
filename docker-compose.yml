@@ -94,7 +94,9 @@ services:
       # Source-mode + optional Epic Bulk Data $export settings. Empty by
       # default; populate via .env (see .env.example) to switch from the
       # bundled fixtures to a live $export against the EHR.
-      SOURCE_MODE: ${SOURCE_MODE:-FIXTURES}
+      SOURCE_MODE: ${SOURCE_MODE:-SYNTHETIC}
+      SYNTH_PATIENT_COUNT: ${SYNTH_PATIENT_COUNT:-100}
+      SYNTH_SEED: ${SYNTH_SEED:-42}
       EPIC_FHIR_BASE: ${EPIC_FHIR_BASE:-}
       EPIC_CLIENT_ID: ${EPIC_CLIENT_ID:-}
       EPIC_PRIVATE_KEY_PEM: ${EPIC_PRIVATE_KEY_PEM:-}

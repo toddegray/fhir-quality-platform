@@ -35,13 +35,28 @@ class HbA1cReading:
 
 
 @dataclass
+class BloodPressureReading:
+    effective_date: date
+    systolic_mmhg: float
+    diastolic_mmhg: float
+
+    def controlled(self) -> bool:
+        return self.systolic_mmhg < 140 and self.diastolic_mmhg < 90
+
+
+@dataclass
 class PatientState:
     patient_id: str
     birth_date: date | None = None
     gender: str | None = None
+    provider_id: str | None = None
     has_diabetes: bool = False
+    has_hypertension: bool = False
     encounter_dates: list[date] = field(default_factory=list)
     hba1c_readings: list[HbA1cReading] = field(default_factory=list)
+    bp_readings: list[BloodPressureReading] = field(default_factory=list)
+    mammography_dates: list[date] = field(default_factory=list)
+    immunization_codes: set[str] = field(default_factory=set)
 
     def age_at(self, reference: date) -> int | None:
         if self.birth_date is None:
@@ -53,6 +68,12 @@ class PatientState:
 
     def latest_hba1c(self) -> HbA1cReading | None:
         return max(self.hba1c_readings, key=lambda r: r.effective_date, default=None)
+
+    def latest_bp(self) -> BloodPressureReading | None:
+        return max(self.bp_readings, key=lambda r: r.effective_date, default=None)
+
+    def had_mammography_in(self, start: date, end: date) -> bool:
+        return any(start <= d <= end for d in self.mammography_dates)
 
     def had_encounter_in(self, start: date, end: date) -> bool:
         return any(start <= d <= end for d in self.encounter_dates)

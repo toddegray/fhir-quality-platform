@@ -19,7 +19,10 @@ import nats
 from fastapi import FastAPI
 
 from .cms122 import compute as compute_cms122
+from .history import serialize as serialize_history
+from .history import synthesise_history
 from .ingest import dispatch
+from .measures import MEASURES, compute_all, serialize
 from .state import PatientStore
 
 logger = logging.getLogger("analytics-py")
@@ -86,6 +89,9 @@ def healthz() -> dict[str, object]:
 
 @app.get("/measures/cms122/results")
 def cms122_results() -> dict[str, object]:
+    # Legacy endpoint retained for the existing edge-node BFF + the
+    # AppControllerOfflineTests-style integration tests; new clients
+    # should use /measures (catalog) and /measures/{id} (per-measure).
     result = compute_cms122(app.state.store)
     return {
         "measureId": "CMS122",
@@ -106,3 +112,68 @@ def cms122_results() -> dict[str, object]:
             for g in result.gap_patients
         ],
     }
+
+
+@app.get("/measures")
+def list_measures() -> dict[str, object]:
+    """All available measures + their current score in one round-trip."""
+    return {"measures": [serialize(s) for s in compute_all(app.state.store)]}
+
+
+@app.get("/measures/{measure_id}")
+def measure_detail(measure_id: str) -> dict[str, object]:
+    fn = MEASURES.get(measure_id.upper())
+    if fn is None:
+        return {"error": "unknown measure", "measureId": measure_id}
+    return serialize(fn(app.state.store))
+
+
+@app.get("/measures/{measure_id}/history")
+def measure_history(measure_id: str) -> dict[str, object]:
+    """Per-measure trend points. See history.py for the data origin."""
+    fn = MEASURES.get(measure_id.upper())
+    if fn is None:
+        return {"error": "unknown measure", "measureId": measure_id}
+    score = fn(app.state.store)
+    points = synthesise_history(
+        measure_id=score.measure_id,
+        current_percentage=score.percentage,
+        current_denominator=score.denominator,
+        direction=score.direction,
+    )
+    return {
+        "measureId": score.measure_id,
+        "source": "synthesised",  # honest: not yet TimescaleDB-backed
+        "points": serialize_history(points),
+    }
+
+
+@app.get("/scorecard")
+def scorecard() -> dict[str, object]:
+    """Provider x measure matrix for the heatmap UI."""
+    scores = compute_all(app.state.store)
+    providers: set[str] = set()
+    for s in scores:
+        providers.update(s.provider_breakdown.keys())
+    provider_list = sorted(providers)
+    matrix = []
+    for measure in scores:
+        row = {
+            "measureId": measure.measure_id,
+            "title": measure.title,
+            "direction": measure.direction,
+            "overallPercentage": measure.percentage,
+            "overallNumerator": measure.numerator,
+            "overallDenominator": measure.denominator,
+            "cells": [],
+        }
+        for pid in provider_list:
+            n, d = measure.provider_breakdown.get(pid, (0, 0))
+            row["cells"].append({
+                "providerId": pid,
+                "numerator": n,
+                "denominator": d,
+                "percentage": round((n / d * 100.0) if d else 0.0, 1),
+            })
+        matrix.append(row)
+    return {"providers": provider_list, "measures": matrix}

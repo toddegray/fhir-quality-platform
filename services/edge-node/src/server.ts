@@ -1,14 +1,15 @@
 // Entry point for the FHIR quality platform edge service.
 //
-// Today it serves:
-//   GET /healthz                — liveness for docker-compose
-//   GET /api/measures/cms122    — BFF that aggregates the core-spring
-//                                 measure metadata with the analytics-py
-//                                 measure results into one dashboard-
-//                                 shaped response.
+// Public surface:
 //
-// Future iterations add SMART on FHIR launch + CDS Hooks service
-// endpoints alongside.
+//   GET  /healthz                       liveness for docker-compose
+//   GET  /api/measures                  catalog of all eCQMs + scores
+//   GET  /api/measures/cms122           per-measure detail (legacy + new)
+//   GET  /api/measures/:measureId       per-measure detail (CMS122/125/165/117)
+//   GET  /api/scorecard                 provider x measure matrix for the heatmap
+//
+// The BFF aggregates Python analytics output with Spring Boot measure-
+// library metadata into one dashboard-shaped response per route.
 
 import Fastify from 'fastify';
 
@@ -31,22 +32,6 @@ interface MeasureMetadata {
   reference: string;
 }
 
-interface GapPatient {
-  patientId: string;
-  age: number;
-  latestHbA1c: number | null;
-  latestHbA1cDate: string;
-}
-
-interface MeasureResult {
-  measureId: string;
-  measurementPeriod: { start: string; end: string };
-  denominator: number;
-  numerator: number;
-  percentage: number;
-  gapPatients: GapPatient[];
-}
-
 async function fetchJson<T>(url: string): Promise<T> {
   const res = await fetch(url);
   if (!res.ok) {
@@ -57,26 +42,55 @@ async function fetchJson<T>(url: string): Promise<T> {
 
 app.get('/healthz', async () => ({ status: 'ok', service: 'edge-node' }));
 
-app.get('/api/measures/cms122', async (_req, reply) => {
+// Catalog + scores for every measure in one round-trip — what the
+// dashboard hits on first load.
+app.get('/api/measures', async (_req, reply) => {
+  try {
+    return await fetchJson<unknown>(`${ANALYTICS_API_URL}/measures`);
+  } catch (err) {
+    app.log.error({ err }, 'measures catalog fetch failed');
+    return reply.code(502).send({ error: 'upstream aggregation failed' });
+  }
+});
+
+// Provider × measure matrix for the heatmap.
+app.get('/api/scorecard', async (_req, reply) => {
+  try {
+    return await fetchJson<unknown>(`${ANALYTICS_API_URL}/scorecard`);
+  } catch (err) {
+    app.log.error({ err }, 'scorecard fetch failed');
+    return reply.code(502).send({ error: 'upstream aggregation failed' });
+  }
+});
+
+// 12-month trend for one measure.
+app.get<{ Params: { measureId: string } }>('/api/measures/:measureId/history', async (req, reply) => {
+  const id = req.params.measureId.toUpperCase();
+  try {
+    return await fetchJson<unknown>(`${ANALYTICS_API_URL}/measures/${id}/history`);
+  } catch (err) {
+    app.log.error({ err, measureId: id }, 'history fetch failed');
+    return reply.code(502).send({ error: 'upstream history failed' });
+  }
+});
+
+// Per-measure detail (full gap list). The path doubles up so the older
+// /api/measures/cms122 URL keeps working.
+app.get<{ Params: { measureId: string } }>('/api/measures/:measureId', async (req, reply) => {
+  const id = req.params.measureId.toUpperCase();
   try {
     const [metadata, result] = await Promise.all([
-      fetchJson<MeasureMetadata>(`${CORE_API_URL}/measures/CMS122`),
-      fetchJson<MeasureResult>(`${ANALYTICS_API_URL}/measures/cms122/results`),
+      fetchJson<MeasureMetadata>(`${CORE_API_URL}/measures/${id}`).catch(() => null),
+      fetchJson<{ measureId: string; [k: string]: unknown }>(`${ANALYTICS_API_URL}/measures/${id}`),
     ]);
     return {
-      id: metadata.id,
-      title: metadata.title,
-      description: metadata.description,
-      direction: metadata.direction,
-      reference: metadata.reference,
-      measurementPeriod: result.measurementPeriod,
-      denominator: result.denominator,
-      numerator: result.numerator,
-      percentage: result.percentage,
-      gapPatients: result.gapPatients,
+      ...result,
+      reference: metadata?.reference,
+      diagnosisCodes: metadata?.diagnosisCodes,
+      labCodes: metadata?.labCodes,
     };
   } catch (err) {
-    app.log.error({ err }, 'cms122 aggregation failed');
+    app.log.error({ err, measureId: id }, 'measure detail fetch failed');
     return reply.code(502).send({ error: 'upstream aggregation failed' });
   }
 });

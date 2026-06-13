@@ -26,6 +26,33 @@ public class MeasureController {
             List.of("E10.*", "E11.*", "E13.*"),
             List.of("LOINC 4548-4", "LOINC 4549-2", "LOINC 17856-6", "LOINC 59261-8"),
             "https://ecqi.healthit.gov/ecqm/ec/2024/cms122v12"
+        ),
+        "CMS125", new Measure(
+            "CMS125",
+            "Breast Cancer Screening (Mammography)",
+            "Percentage of women 50-74 with one or more mammograms during the measurement period or the 15 months prior to the measurement period.",
+            "higher-is-better",
+            List.of(),
+            List.of("CPT 77067"),
+            "https://ecqi.healthit.gov/ecqm/ec/2024/cms125v12"
+        ),
+        "CMS165", new Measure(
+            "CMS165",
+            "Controlling High Blood Pressure",
+            "Percentage of patients 18-85 with hypertension whose blood pressure was controlled (< 140/90 mmHg) during the measurement period.",
+            "higher-is-better",
+            List.of("I10"),
+            List.of("LOINC 85354-9", "LOINC 8480-6", "LOINC 8462-4"),
+            "https://ecqi.healthit.gov/ecqm/ec/2024/cms165v12"
+        ),
+        "CMS117", new Measure(
+            "CMS117",
+            "Childhood Immunization Status",
+            "Percentage of children 2 years of age who had the combo-10 vaccine series by their second birthday.",
+            "higher-is-better",
+            List.of(),
+            List.of("CVX 08", "CVX 10", "CVX 20", "CVX 94", "CVX 115"),
+            "https://ecqi.healthit.gov/ecqm/ec/2024/cms117v12"
         )
     );
 

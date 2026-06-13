@@ -183,12 +183,25 @@ func buildSourceForMode(ctx context.Context, mode string, log *slog.Logger) (Sou
 			Dir:   envOr("FIXTURES_DIR", defaultFixturesDir),
 			Label: envOr("FIXTURES_LABEL", "fixtures"),
 		}, nil
+	case "SYNTHETIC":
+		s := NewSyntheticCohortSource()
+		if v := os.Getenv("SYNTH_PATIENT_COUNT"); v != "" {
+			if n, err := strconv.Atoi(v); err == nil {
+				s.PatientCount = n
+			}
+		}
+		if v := os.Getenv("SYNTH_SEED"); v != "" {
+			if n, err := strconv.ParseUint(v, 10, 64); err == nil {
+				s.Seed = n
+			}
+		}
+		return s, nil
 	case "BULK_EXPORT":
 		return buildBulkExportSource(ctx, log)
 	case "EPIC_REST":
 		return buildEpicRestSource(ctx, log)
 	default:
-		return nil, fmt.Errorf("unknown source mode %q (want FIXTURES, BULK_EXPORT, or EPIC_REST)", mode)
+		return nil, fmt.Errorf("unknown source mode %q (want FIXTURES, SYNTHETIC, BULK_EXPORT, or EPIC_REST)", mode)
 	}
 }
 
